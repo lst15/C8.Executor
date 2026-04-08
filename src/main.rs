@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use c8_executor::{AppConfig, build_app_from_config};
+use c8_executor::{build_app_from_config, AppConfig};
 use tokio::net::TcpListener;
 use tracing::info;
 

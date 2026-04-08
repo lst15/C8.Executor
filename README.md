@@ -14,6 +14,7 @@ Implementacao da Camada 08 (Execucao Tecnica) da plataforma Uranometria em Rust,
 ## Endpoints
 
 - `GET /health`
+- `GET /openapi.json`
 - `POST /v1/execution/workspaces/{workspace_id}/runs`
 - `POST /v1/execution/runs/{run_id}/start`
 - `POST /v1/execution/runs/{run_id}/steps`

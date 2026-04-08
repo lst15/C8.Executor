@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use axum::{
-    Json, Router,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     routing::{get, post},
+    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     application::service::{
-        AddArtifactCommand, AddStepCommand, CancelRunCommand, CloseRunCommand,
-        CompleteStepCommand, ExecutorService, OpenRunCommand, StartRunCommand,
+        AddArtifactCommand, AddStepCommand, CancelRunCommand, CloseRunCommand, CompleteStepCommand,
+        ExecutorService, OpenRunCommand, StartRunCommand,
     },
     domain::{
         error::AppError,
@@ -29,12 +29,16 @@ pub fn build_router(service: Arc<ExecutorService>) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/openapi.json", get(openapi_spec))
         .route(
             "/v1/execution/workspaces/{workspace_id}/runs",
             post(open_run),
         )
         .route("/v1/execution/runs/{run_id}/start", post(start_run))
-        .route("/v1/execution/runs/{run_id}/steps", post(add_step).get(get_steps))
+        .route(
+            "/v1/execution/runs/{run_id}/steps",
+            post(add_step).get(get_steps),
+        )
         .route(
             "/v1/execution/runs/{run_id}/steps/{step_id}/complete",
             post(complete_step),
@@ -58,6 +62,35 @@ async fn health() -> Json<HealthResponse> {
         status: "ok",
         service: "C8.Executor",
     })
+}
+
+async fn openapi_spec() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+      "openapi": "3.1.0",
+      "info": {
+        "title": "C8.Executor API",
+        "version": "1.0.0",
+        "description": "Contrato sincrono da Camada 08 (Execucao Tecnica)."
+      },
+      "paths": {
+        "/v1/execution/workspaces/{workspace_id}/runs": { "post": {} },
+        "/v1/execution/runs/{run_id}/start": { "post": {} },
+        "/v1/execution/runs/{run_id}/steps": { "post": {}, "get": {} },
+        "/v1/execution/runs/{run_id}/steps/{step_id}/complete": { "post": {} },
+        "/v1/execution/runs/{run_id}/artifacts": { "post": {} },
+        "/v1/execution/runs/{run_id}/cancel": { "post": {} },
+        "/v1/execution/runs/{run_id}/close": { "post": {} },
+        "/v1/execution/runs/{run_id}": { "get": {} },
+        "/v1/execution/runs/{run_id}/logs": { "get": {} }
+      },
+      "components": {
+        "parameters": {
+          "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" } },
+          "CorrelationId": { "name": "X-Correlation-Id", "in": "header", "required": true, "schema": { "type": "string" } },
+          "WorkspaceScope": { "name": "X-Workspace-Id", "in": "header", "required": false, "schema": { "type": "string" } }
+        }
+      }
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,7 +185,10 @@ async fn start_run(
 
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let result = state
@@ -181,7 +217,10 @@ async fn add_step(
 
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let result = state
@@ -213,7 +252,10 @@ async fn complete_step(
 
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let result = state
@@ -245,7 +287,10 @@ async fn add_artifact(
 
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let result = state
@@ -277,7 +322,10 @@ async fn cancel_run(
 
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let result = state
@@ -307,7 +355,10 @@ async fn close_run(
 
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let result = state
@@ -333,7 +384,10 @@ async fn get_run(
 ) -> Result<Json<RunResponse>, AppError> {
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let run = state.service.get_run(&run_id).await?;
@@ -347,7 +401,10 @@ async fn get_steps(
 ) -> Result<Json<StepsResponse>, AppError> {
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let steps = state.service.list_steps(&run_id).await?;
@@ -361,7 +418,10 @@ async fn get_logs(
 ) -> Result<Json<LogsResponse>, AppError> {
     state
         .service
-        .enforce_workspace_scope(&run_id, optional_header(&headers, "X-Workspace-Id").as_deref())
+        .enforce_workspace_scope(
+            &run_id,
+            optional_header(&headers, "X-Workspace-Id").as_deref(),
+        )
         .await?;
 
     let logs = state.service.list_logs(&run_id).await?;

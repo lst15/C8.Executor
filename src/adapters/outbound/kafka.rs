@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use rdkafka::{
-    ClientConfig,
     producer::{FutureProducer, FutureRecord},
+    ClientConfig,
 };
 
 use crate::{

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{FromRow, PgPool, postgres::PgPoolOptions};
+use sqlx::{postgres::PgPoolOptions, FromRow, PgPool};
 
 use crate::{
     domain::{
@@ -84,6 +84,18 @@ impl PostgresPorts {
             CREATE INDEX IF NOT EXISTS idx_c8_logs_run
                 ON c8_execution_logs (run_id, occurred_at ASC);
 
+            CREATE TABLE IF NOT EXISTS c8_execution_timeline (
+                timeline_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload JSONB NOT NULL,
+                occurred_at TIMESTAMPTZ NOT NULL,
+                correlation_id TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_c8_timeline_run
+                ON c8_execution_timeline (run_id, occurred_at ASC);
+
             CREATE TABLE IF NOT EXISTS c8_execution_idempotency (
                 scope TEXT NOT NULL,
                 idempotency_key TEXT NOT NULL,
@@ -158,8 +170,9 @@ impl TryFrom<RunRow> for ExecutionRun {
             run_id: value.run_id,
             workspace_id: value.workspace_id,
             ops_session_id: value.ops_session_id,
-            status: ExecutionStatus::from_wire(&value.status)
-                .ok_or_else(|| AppError::Dependency(format!("invalid run status in db: {}", value.status)))?,
+            status: ExecutionStatus::from_wire(&value.status).ok_or_else(|| {
+                AppError::Dependency(format!("invalid run status in db: {}", value.status))
+            })?,
             ready_for_execution: value.ready_for_execution,
             started_at: value.started_at,
             ended_at: value.ended_at,
@@ -179,8 +192,9 @@ impl TryFrom<StepRow> for ExecutionStep {
             run_id: value.run_id,
             workspace_id: value.workspace_id,
             name: value.name,
-            status: StepStatus::from_wire(&value.status)
-                .ok_or_else(|| AppError::Dependency(format!("invalid step status in db: {}", value.status)))?,
+            status: StepStatus::from_wire(&value.status).ok_or_else(|| {
+                AppError::Dependency(format!("invalid step status in db: {}", value.status))
+            })?,
             detail: value.detail,
             created_at: value.created_at,
             completed_at: value.completed_at,
@@ -295,8 +309,31 @@ impl ExecutionRepository for PostgresPorts {
         .await
         .map_err(|e| AppError::Dependency(format!("postgres update run status error: {e}")))?;
 
-        let row = row.ok_or_else(|| AppError::NotFound(format!("run {} nao encontrada", run_id)))?;
-        row.try_into()
+        let row =
+            row.ok_or_else(|| AppError::NotFound(format!("run {} nao encontrada", run_id)))?;
+        let run: ExecutionRun = row.try_into()?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO c8_execution_timeline (
+                timeline_id, run_id, workspace_id, status, payload, occurred_at, correlation_id
+            ) VALUES ($1,$2,$3,$4,$5,NOW(),$6)
+            "#,
+        )
+        .bind(format!("tl_{}", uuid::Uuid::new_v4().simple()))
+        .bind(&run.run_id)
+        .bind(&run.workspace_id)
+        .bind(run.status.as_wire())
+        .bind(serde_json::json!({
+            "started_at": run.started_at,
+            "ended_at": run.ended_at,
+        }))
+        .bind(correlation_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Dependency(format!("postgres add timeline entry error: {e}")))?;
+
+        Ok(run)
     }
 
     async fn add_step(

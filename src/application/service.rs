@@ -8,9 +8,9 @@ use crate::{
     domain::{
         error::AppError,
         events::{
-            EXECUTION_ARTIFACT_REGISTERED, EXECUTION_CANCELED, EXECUTION_COMPLETED,
+            EventEnvelope, EXECUTION_ARTIFACT_REGISTERED, EXECUTION_CANCELED, EXECUTION_COMPLETED,
             EXECUTION_FAILED, EXECUTION_RUN_CLOSED, EXECUTION_RUN_OPENED, EXECUTION_STARTED,
-            EXECUTION_STEP_COMPLETED, EXECUTION_STEP_REGISTERED, EventEnvelope,
+            EXECUTION_STEP_COMPLETED, EXECUTION_STEP_REGISTERED,
         },
         model::{
             CommandAccepted, ExecutionArtifact, ExecutionLog, ExecutionRun, ExecutionStatus,
@@ -19,6 +19,15 @@ use crate::{
     },
     ports::{EventPublisher, ExecutionRepository, IdempotencyRepository},
 };
+
+#[derive(Debug, Clone, Copy)]
+struct StepsSummary {
+    total: usize,
+    pending: usize,
+    running: usize,
+    completed: usize,
+    failed: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct OpenRunCommand {
@@ -311,8 +320,14 @@ impl ExecutorService {
         Ok(accepted)
     }
 
-    pub async fn complete_step(&self, cmd: CompleteStepCommand) -> Result<CommandAccepted, AppError> {
-        if cmd.run_id.trim().is_empty() || cmd.step_id.trim().is_empty() || cmd.status.trim().is_empty() {
+    pub async fn complete_step(
+        &self,
+        cmd: CompleteStepCommand,
+    ) -> Result<CommandAccepted, AppError> {
+        if cmd.run_id.trim().is_empty()
+            || cmd.step_id.trim().is_empty()
+            || cmd.status.trim().is_empty()
+        {
             return Err(AppError::Validation(
                 "run_id, step_id e status sao obrigatorios".to_string(),
             ));
@@ -562,7 +577,14 @@ impl ExecutorService {
             )
             .await?;
 
+        let steps = self.repository.list_steps(&cmd.run_id).await?;
+        let artifacts = self.repository.list_artifacts(&cmd.run_id).await?;
+        let duration_ms = duration_ms(ended.started_at, ended.ended_at);
+        let steps_summary = summarize_steps(&steps);
+
         if ended.status == ExecutionStatus::Completed {
+            let completed_payload =
+                build_final_payload(&ended, duration_ms, steps_summary, &artifacts, None);
             self.publisher
                 .publish(EventEnvelope {
                     event_id: Uuid::new_v4().to_string(),
@@ -572,10 +594,31 @@ impl ExecutorService {
                     run_id: ended.run_id.clone(),
                     occurred_at: Utc::now(),
                     correlation_id: cmd.correlation_id.clone(),
-                    payload: json!({
-                        "status": ended.status.as_wire(),
-                        "failed_steps": failed_steps,
-                    }),
+                    payload: completed_payload,
+                })
+                .await?;
+        } else if ended.status == ExecutionStatus::Failed {
+            let error_summary = cmd
+                .reason
+                .clone()
+                .unwrap_or_else(|| "execution failed due to one or more failed steps".to_string());
+            let failed_payload = build_final_payload(
+                &ended,
+                duration_ms,
+                steps_summary,
+                &artifacts,
+                Some(error_summary),
+            );
+            self.publisher
+                .publish(EventEnvelope {
+                    event_id: Uuid::new_v4().to_string(),
+                    event_type: EXECUTION_FAILED.to_string(),
+                    event_version: "1.0".to_string(),
+                    workspace_id: ended.workspace_id.clone(),
+                    run_id: ended.run_id.clone(),
+                    occurred_at: Utc::now(),
+                    correlation_id: cmd.correlation_id.clone(),
+                    payload: failed_payload,
                 })
                 .await?;
         }
@@ -670,23 +713,93 @@ impl ExecutorService {
 
     async fn ensure_run_mutable(&self, run_id: &str) -> Result<ExecutionRun, AppError> {
         let run = self.get_run(run_id).await?;
-        if run.status == ExecutionStatus::Closed {
+        if matches!(
+            run.status,
+            ExecutionStatus::Closed | ExecutionStatus::Canceled | ExecutionStatus::Failed
+        ) {
             return Err(AppError::Conflict(format!(
-                "run {} nao pode ser alterada em status closed",
+                "run {} nao pode ser alterada em status {}",
                 run_id
+                ,
+                run.status.as_wire()
             )));
         }
         Ok(run)
     }
 }
 
+fn summarize_steps(steps: &[ExecutionStep]) -> StepsSummary {
+    let mut summary = StepsSummary {
+        total: steps.len(),
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+    };
+
+    for step in steps {
+        match step.status {
+            StepStatus::Pending => summary.pending += 1,
+            StepStatus::Running => summary.running += 1,
+            StepStatus::Completed => summary.completed += 1,
+            StepStatus::Failed => summary.failed += 1,
+        }
+    }
+
+    summary
+}
+
+fn duration_ms(
+    started_at: Option<chrono::DateTime<chrono::Utc>>,
+    ended_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> i64 {
+    match (started_at, ended_at) {
+        (Some(started), Some(ended)) => ended
+            .signed_duration_since(started)
+            .num_milliseconds()
+            .max(0),
+        _ => 0,
+    }
+}
+
+fn build_final_payload(
+    run: &ExecutionRun,
+    duration_ms: i64,
+    steps_summary: StepsSummary,
+    artifacts: &[ExecutionArtifact],
+    error_summary: Option<String>,
+) -> serde_json::Value {
+    json!({
+        "workspace_id": run.workspace_id,
+        "run_id": run.run_id,
+        "status": run.status.as_wire(),
+        "duration_ms": duration_ms,
+        "steps_summary": {
+            "total": steps_summary.total,
+            "pending": steps_summary.pending,
+            "running": steps_summary.running,
+            "completed": steps_summary.completed,
+            "failed": steps_summary.failed,
+        },
+        "artifacts": artifacts,
+        "steps_total": steps_summary.total,
+        "steps_failed": steps_summary.failed,
+        "artifacts_total": artifacts.len(),
+        "error_summary": error_summary,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
+    use serde_json::Value;
+
+    use crate::domain::events::EXECUTION_COMPLETED;
     use crate::{
         adapters::outbound::in_memory::InMemoryPorts,
         application::service::{
+            AddArtifactCommand, AddStepCommand, CloseRunCommand, CompleteStepCommand,
             ExecutorService, OpenRunCommand, StartRunCommand,
         },
     };
@@ -737,5 +850,104 @@ mod tests {
             .await;
 
         assert!(fail.is_err());
+    }
+
+    #[tokio::test]
+    async fn should_emit_completed_payload_with_execution_summary() {
+        let ports = Arc::new(InMemoryPorts::new());
+        let service = ExecutorService::new(ports.clone(), ports.clone(), ports.clone());
+
+        service
+            .open_run(OpenRunCommand {
+                run_id: Some("run_003".to_string()),
+                workspace_id: "ws_001".to_string(),
+                ops_session_id: "os_003".to_string(),
+                ready_for_execution: true,
+                idempotency_key: "idem-open-003".to_string(),
+                correlation_id: "corr-open-003".to_string(),
+            })
+            .await
+            .expect("open ok");
+
+        service
+            .start_run(StartRunCommand {
+                run_id: "run_003".to_string(),
+                idempotency_key: "idem-start-003".to_string(),
+                correlation_id: "corr-start-003".to_string(),
+            })
+            .await
+            .expect("start ok");
+
+        service
+            .add_step(AddStepCommand {
+                run_id: "run_003".to_string(),
+                step_id: Some("stp_003".to_string()),
+                name: "build".to_string(),
+                detail: None,
+                idempotency_key: "idem-step-003".to_string(),
+                correlation_id: "corr-step-003".to_string(),
+            })
+            .await
+            .expect("step ok");
+
+        service
+            .complete_step(CompleteStepCommand {
+                run_id: "run_003".to_string(),
+                step_id: "stp_003".to_string(),
+                status: "completed".to_string(),
+                detail: None,
+                idempotency_key: "idem-stepc-003".to_string(),
+                correlation_id: "corr-stepc-003".to_string(),
+            })
+            .await
+            .expect("step complete ok");
+
+        service
+            .add_artifact(AddArtifactCommand {
+                run_id: "run_003".to_string(),
+                artifact_id: Some("art_003".to_string()),
+                artifact_type: "build".to_string(),
+                storage_ref: "s3://bucket/build.zip".to_string(),
+                idempotency_key: "idem-art-003".to_string(),
+                correlation_id: "corr-art-003".to_string(),
+            })
+            .await
+            .expect("artifact ok");
+
+        service
+            .close_run(CloseRunCommand {
+                run_id: "run_003".to_string(),
+                reason: Some("finished".to_string()),
+                idempotency_key: "idem-close-003".to_string(),
+                correlation_id: "corr-close-003".to_string(),
+            })
+            .await
+            .expect("close ok");
+
+        let events = ports.published_events().expect("events");
+        let completed = events
+            .iter()
+            .find(|event| event.event_type == EXECUTION_COMPLETED)
+            .expect("completed event");
+
+        let payload = &completed.payload;
+        assert_eq!(
+            payload.get("workspace_id"),
+            Some(&Value::String("ws_001".to_string()))
+        );
+        assert_eq!(
+            payload.get("run_id"),
+            Some(&Value::String("run_003".to_string()))
+        );
+        assert_eq!(
+            payload.get("status"),
+            Some(&Value::String("completed".to_string()))
+        );
+        assert!(payload.get("duration_ms").is_some());
+        assert!(payload.get("steps_summary").is_some());
+        assert!(payload
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .is_some_and(|arr| !arr.is_empty()));
     }
 }

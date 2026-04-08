@@ -36,6 +36,11 @@ impl InMemoryPorts {
             state: Mutex::new(State::default()),
         }
     }
+
+    pub fn published_events(&self) -> Result<Vec<EventEnvelope>, AppError> {
+        let guard = self.state.lock().map_err(|_| AppError::Internal)?;
+        Ok(guard.events.clone())
+    }
 }
 
 #[async_trait]
@@ -129,7 +134,9 @@ impl ExecutionRepository for InMemoryPorts {
 
         step.status = StepStatus::from_wire(status)
             .ok_or_else(|| AppError::Validation(format!("status invalido: {}", status)))?;
-        step.detail = detail.map(|v| v.to_string()).or_else(|| step.detail.clone());
+        step.detail = detail
+            .map(|v| v.to_string())
+            .or_else(|| step.detail.clone());
         step.completed_at = Some(Utc::now());
         step.correlation_id = correlation_id.to_string();
 

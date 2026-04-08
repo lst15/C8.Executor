@@ -3,9 +3,7 @@ use async_trait::async_trait;
 use crate::domain::{
     error::AppError,
     events::EventEnvelope,
-    model::{
-        CommandAccepted, ExecutionArtifact, ExecutionLog, ExecutionRun, ExecutionStep,
-    },
+    model::{CommandAccepted, ExecutionArtifact, ExecutionLog, ExecutionRun, ExecutionStep},
 };
 
 #[async_trait]
