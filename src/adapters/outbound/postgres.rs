@@ -29,7 +29,7 @@ impl PostgresPorts {
     }
 
     pub async fn ensure_schema(&self) -> Result<(), AppError> {
-        sqlx::query(
+        let statements = [
             r#"
             CREATE TABLE IF NOT EXISTS c8_execution_runs (
                 run_id TEXT PRIMARY KEY,
@@ -42,10 +42,13 @@ impl PostgresPorts {
                 created_at TIMESTAMPTZ NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL,
                 correlation_id TEXT NOT NULL
-            );
+            )
+            "#,
+            r#"
             CREATE INDEX IF NOT EXISTS idx_c8_runs_workspace
-                ON c8_execution_runs (workspace_id, updated_at DESC);
-
+                ON c8_execution_runs (workspace_id, updated_at DESC)
+            "#,
+            r#"
             CREATE TABLE IF NOT EXISTS c8_execution_steps (
                 step_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -56,10 +59,13 @@ impl PostgresPorts {
                 created_at TIMESTAMPTZ NOT NULL,
                 completed_at TIMESTAMPTZ NULL,
                 correlation_id TEXT NOT NULL
-            );
+            )
+            "#,
+            r#"
             CREATE INDEX IF NOT EXISTS idx_c8_steps_run
-                ON c8_execution_steps (run_id, created_at ASC);
-
+                ON c8_execution_steps (run_id, created_at ASC)
+            "#,
+            r#"
             CREATE TABLE IF NOT EXISTS c8_execution_artifacts (
                 artifact_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -68,10 +74,13 @@ impl PostgresPorts {
                 storage_ref TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
                 correlation_id TEXT NOT NULL
-            );
+            )
+            "#,
+            r#"
             CREATE INDEX IF NOT EXISTS idx_c8_artifacts_run
-                ON c8_execution_artifacts (run_id, created_at ASC);
-
+                ON c8_execution_artifacts (run_id, created_at ASC)
+            "#,
+            r#"
             CREATE TABLE IF NOT EXISTS c8_execution_logs (
                 log_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -80,10 +89,13 @@ impl PostgresPorts {
                 message TEXT NOT NULL,
                 occurred_at TIMESTAMPTZ NOT NULL,
                 correlation_id TEXT NOT NULL
-            );
+            )
+            "#,
+            r#"
             CREATE INDEX IF NOT EXISTS idx_c8_logs_run
-                ON c8_execution_logs (run_id, occurred_at ASC);
-
+                ON c8_execution_logs (run_id, occurred_at ASC)
+            "#,
+            r#"
             CREATE TABLE IF NOT EXISTS c8_execution_timeline (
                 timeline_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
@@ -92,22 +104,29 @@ impl PostgresPorts {
                 payload JSONB NOT NULL,
                 occurred_at TIMESTAMPTZ NOT NULL,
                 correlation_id TEXT NOT NULL
-            );
+            )
+            "#,
+            r#"
             CREATE INDEX IF NOT EXISTS idx_c8_timeline_run
-                ON c8_execution_timeline (run_id, occurred_at ASC);
-
+                ON c8_execution_timeline (run_id, occurred_at ASC)
+            "#,
+            r#"
             CREATE TABLE IF NOT EXISTS c8_execution_idempotency (
                 scope TEXT NOT NULL,
                 idempotency_key TEXT NOT NULL,
                 response JSONB NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (scope, idempotency_key)
-            );
+            )
             "#,
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| AppError::Dependency(format!("postgres schema init error: {e}")))?;
+        ];
+
+        for statement in statements {
+            sqlx::query(statement)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| AppError::Dependency(format!("postgres schema init error: {e}")))?;
+        }
 
         Ok(())
     }

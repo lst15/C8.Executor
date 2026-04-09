@@ -49,26 +49,32 @@ Header opcional para enforce de escopo por workspace:
 
 ## Como executar
 
-1. Suba infraestrutura local (Postgres + Kafka):
+1. Suba stack completa local (Postgres + Kafka + API C8):
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-2. Carregue as variaveis de ambiente:
+2. Verifique health:
+
+```bash
+curl -i http://localhost:8087/health
+```
+
+3. (Opcional) Executar a API fora do container:
 
 ```bash
 cp .env.example .env
 set -a; source .env; set +a
-```
-
-3. Inicie a API:
-
-```bash
 cargo run --bin c8-executor
 ```
 
 Servidor padrao: `http://localhost:8087`
+
+## Homologacao manual
+
+- Curls de validacao: `docs/manual-tests-curls-localhost-8087.txt`
+- Relatorio de execucao: `docs/homologacao-manual-2026-04-09.md`
 
 ## Regras tecnicas implementadas
 

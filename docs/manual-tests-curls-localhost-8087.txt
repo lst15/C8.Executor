@@ -1,0 +1,90 @@
+# C8.Executor - Curls manuais (localhost:8087)
+
+curl -i "http://localhost:8087/health"
+curl -i "http://localhost:8087/openapi.json"
+
+curl -i -X POST "http://localhost:8087/v1/execution/workspaces/ws_c8_manual_001/runs" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-open-001' \
+  -H 'X-Correlation-Id: corr-c8-open-001' \
+  -d '{"run_id":"run_c8_manual_001","ops_session_id":"os_c7_manual_003","ready_for_execution":true}'
+
+curl -i -X POST "http://localhost:8087/v1/execution/workspaces/ws_c8_manual_001/runs" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-open-001' \
+  -H 'X-Correlation-Id: corr-c8-open-001-bis' \
+  -d '{"run_id":"run_c8_manual_001","ops_session_id":"os_c7_manual_003","ready_for_execution":true}'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/start" \
+  -H 'Idempotency-Key: idem-c8-start-001' \
+  -H 'X-Correlation-Id: corr-c8-start-001' \
+  -H 'X-Workspace-Id: ws_c8_manual_001'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/steps" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-step-001' \
+  -H 'X-Correlation-Id: corr-c8-step-001' \
+  -H 'X-Workspace-Id: ws_c8_manual_001' \
+  -d '{"step_id":"stp_c8_manual_001","name":"build","detail":"compilacao"}'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/steps/stp_c8_manual_001/complete" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-stepc-invalid-001' \
+  -H 'X-Correlation-Id: corr-c8-stepc-invalid-001' \
+  -H 'X-Workspace-Id: ws_c8_manual_001' \
+  -d '{"status":"running","detail":"invalido"}'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/steps/stp_c8_manual_001/complete" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-stepc-001' \
+  -H 'X-Correlation-Id: corr-c8-stepc-001' \
+  -H 'X-Workspace-Id: ws_c8_manual_001' \
+  -d '{"status":"completed","detail":"ok"}'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/artifacts" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-art-001' \
+  -H 'X-Correlation-Id: corr-c8-art-001' \
+  -H 'X-Workspace-Id: ws_c8_manual_001' \
+  -d '{"artifact_id":"art_c8_manual_001","artifact_type":"build","storage_ref":"s3://bucket/app.tar.gz"}'
+
+curl -i "http://localhost:8087/v1/execution/runs/run_c8_manual_001" \
+  -H 'X-Workspace-Id: ws_c8_manual_001'
+
+curl -i "http://localhost:8087/v1/execution/runs/run_c8_manual_001/steps" \
+  -H 'X-Workspace-Id: ws_c8_manual_001'
+
+curl -i "http://localhost:8087/v1/execution/runs/run_c8_manual_001/logs" \
+  -H 'X-Workspace-Id: ws_c8_manual_001'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/close" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-close-001' \
+  -H 'X-Correlation-Id: corr-c8-close-001' \
+  -H 'X-Workspace-Id: ws_c8_manual_001' \
+  -d '{"reason":"done"}'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/steps" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-step-after-close-001' \
+  -H 'X-Correlation-Id: corr-c8-step-after-close-001' \
+  -H 'X-Workspace-Id: ws_c8_manual_001' \
+  -d '{"step_id":"stp_c8_manual_002","name":"deploy","detail":"nao deve"}'
+
+curl -i "http://localhost:8087/v1/execution/runs/run_c8_manual_001" \
+  -H 'X-Workspace-Id: ws_c8_manual_999'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_001/start" \
+  -H 'X-Correlation-Id: corr-c8-missing-idem' \
+  -H 'X-Workspace-Id: ws_c8_manual_001'
+
+curl -i -X POST "http://localhost:8087/v1/execution/workspaces/ws_c8_manual_002/runs" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-c8-open-002' \
+  -H 'X-Correlation-Id: corr-c8-open-002' \
+  -d '{"run_id":"run_c8_manual_002","ops_session_id":"os_c7_manual_004","ready_for_execution":false}'
+
+curl -i -X POST "http://localhost:8087/v1/execution/runs/run_c8_manual_002/start" \
+  -H 'Idempotency-Key: idem-c8-start-002' \
+  -H 'X-Correlation-Id: corr-c8-start-002' \
+  -H 'X-Workspace-Id: ws_c8_manual_002'
